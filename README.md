@@ -1,10 +1,17 @@
 # ABLETON SCORE
 
+The project is a way to connect Ableton Live with notated music (rendered as PNG files) and consists of two main things:
+1. a rehearsal page which can be hosted on the internet and protected with a password, to allow musicians to hear an exported audio version of the Ableton session and see the notation for that section
+2. A main page which can be used for rehearsal and performance, which syncs to an Ableton session via AbletonJS and uses locators to display the relevant sheet music / text instructions / other graphics, plus a countdown to the next section and other contextual information.   
+
 Please get in touch if you'd like me to put together a version of this tailored to one of your projects (i.e. if you need to sync written notation with Ableton Live sets and playback). I can do this on commission.
 
 Otherwise, the code is provided as is and with no licence, do what you like with it!
 
+![Screenshot Displaying Notation and Ableton Open](screenshots/screenshot.png)
 
+## INSTALLING ABLETONJS 
+1. please look this up yourself, I will add instructions later.... sorry!
 
 ## FILES EXPLAINED
 syncLocators.js - searches locators in your project and (assuming they are formatted correctly) updates the timestamps
