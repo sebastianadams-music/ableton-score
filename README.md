@@ -1,4 +1,10 @@
-# LUNA ABLETON BRIDGE
+# ABLETON SCORE
+
+Please get in touch if you'd like me to put together a version of this tailored to one of your projects (i.e. if you need to sync written notation with Ableton Live sets and playback). I can do this on commission.
+
+Otherwise, the code is provided as is and with no licence, do what you like with it!
+
+
 
 ## FILES EXPLAINED
 syncLocators.js - searches locators in your project and (assuming they are formatted correctly) updates the timestamps
@@ -18,7 +24,7 @@ syncLocators.js and importLocators.js both perform destructive edits to your Abl
 6. access the Rehearsal Tool at http://localhost:3000/static.html
 7. Open your ableton set. Once locators are set, run dumpLocators.js to export them to the locators_log.txt file. Place this file in the "public" folder to set up the Rehearsal tool. See the section "IMPORT LOCATORS ..." for more details
 8. server.js reads the locators directly from the currently open Live session for use on the main page (index.html)
-9. Place all score images in "public/images". 
+9. Place all score images in "public/images". Their names should match locators but be in lower case. I use two letter codes for tracks / large sections and numbers / numbers and letters for smaller sections. e.g. SR1 SR2 SR3 SR1b SR2 - multiple locators can have the same code if they need to refer to the same image
 10. When "server.js" is running, and index.html is open, Ableton should automatically sync with it, displaying any images whose names are the first portion (before a space and hyphen) of the most recent locator in Ableton. 
 
 ## CREATING LOCATORS IN ABLETON
