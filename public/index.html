@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Luna Simple HUD</title>
+<style>
+/* CRITICAL: Force the browser to stick to one screen */
+    html, body {
+        height: 100vh;
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+        overflow: hidden; /* No scrollbars ever */
+        background: #111;
+        color: white;
+        font-family: sans-serif;
+    }
+
+    body {
+        display: flex;
+        flex-direction: column;
+        padding: 10px 20px;
+        box-sizing: border-box;
+        text-align: center;
+    }
+
+    /* Fixed Header: Stays at the top */
+    #header-strip {
+        flex: 0 0 auto; 
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        min-height: 120px;
+        margin-bottom: 10px;
+    }
+    
+    #bars-countdown {
+        position: absolute;
+        left: 0;
+        top: 0;
+        font-size: 6rem;
+        color: #ffcc00;
+        font-family: 'Courier New', Courier, monospace;
+        margin: 0;
+        line-height: 1;
+    }
+
+    #section-context {
+        color: #666;
+        font-family: monospace;
+        font-size: 1.2rem;
+        letter-spacing: 2px;
+        margin-bottom: 5px;
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .context-item { padding: 2px 6px; border-radius: 3px; }
+    .context-highlight { background-color: #ff4444; color: white; font-weight: bold; }
+    
+    #locator-name {
+        margin: 0;
+        font-size: 3rem;
+        text-transform: uppercase;
+        letter-spacing: 4px;
+    }
+
+    /* THE STRETCHY MIDDLE: This container handles the "fit to screen" logic */
+    #display-container {
+        flex: 1; 
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between; /* Spreads elements out to fill height */
+        min-height: 0; /* Important for children to shrink */
+        gap: 10px;
+    }
+
+    #instructions-box {
+        flex: 0 1 auto; /* Allow box to shrink if necessary */
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .instruction-line {
+        background: rgba(0, 255, 204, 0.1);
+        color: #00ffcc;
+        font-size: 2rem;
+        font-weight: bold;
+        padding: 10px 20px;
+        border-left: 6px solid #00ffcc;
+        margin: 0;
+    }
+
+    /* THE AUTO-RESIZER: This is the magic part */
+    #visual-cue { 
+        flex: 1; 
+        min-height: 0; /* Crucial: allows image to shrink below its natural size */
+        width: auto;
+        max-width: 90%; 
+        object-fit: contain; /* Shrinks the image to fit without stretching */
+        border: 4px solid #444; 
+        background: #222;
+    }
+
+    /* Fixed Footer: Stays at the bottom */
+    #next-section-box {
+        flex: 0 0 auto;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-top: 1px solid #333;
+        width: 70%;
+    }
+
+    #next-label { color: #888; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 2px; }
+    #next-title { font-size: 1.5rem; font-weight: bold; margin: 2px 0; }
+    #next-details { color: #bbb; font-size: 1rem; font-style: italic; }
+
+    .info { 
+        flex: 0 0 auto;
+        color: #666; 
+        font-family: monospace; 
+        font-size: 1rem; 
+        margin-top: 5px;
+    }
+    #ref-time { color: #ffcc00; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div id="header-strip">
+    <div id="bars-countdown">0</div>
+    <div style="display: flex; flex-direction: column; align-items: center; width: 60%;"> 
+        <div id="section-context"></div>
+        <h1 id="locator-name">WAITING...</h1>
+    </div>
+</div>
+
+    <div id="display-container">    
+        <div id="instructions-box"></div>
+        
+        <img id="visual-cue" src="" alt="Section Image">
+
+        <div id="next-section-box">
+            <div id="next-label">Up Next</div>
+            <div id="next-title">--</div>
+            <div id="next-details">--</div>
+        </div>
+
+        <div class="info">
+            Transport: <span id="time-val">0.00</span> | Ref: <span id="ref-time">--:--</span>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const imgElement = document.getElementById('visual-cue');
+        const nameElement = document.getElementById('locator-name');
+        const contextElement = document.getElementById('section-context');
+        const timeElement = document.getElementById('time-val');
+        const refElement = document.getElementById('ref-time');
+        const instructionsBox = document.getElementById('instructions-box');
+        const countdownElement = document.getElementById('bars-countdown');
+        const nextTitle = document.getElementById('next-title');
+        const nextDetails = document.getElementById('next-details');
+
+        // STREAM 1: High Frequency (Throttled Time)
+socket.on("time_update", (data) => {
+            if (data.time) timeElement.innerText = data.time;
+            
+            if (data.barsUntil !== undefined) {
+                countdownElement.innerText = data.barsUntil;
+                countdownElement.style.color = data.barsUntil <= 1 ? "#ff4444" : "#ffcc00";
+            }
+
+            // Update the Red Box Highlight in real-time
+            if (data.liveContext) {
+                updateContextUI(data.liveContext);
+            }
+        });
+
+        // Create a helper function to avoid repeating code
+        function updateContextUI(contextString) {
+            contextElement.innerHTML = ""; 
+            const sections = contextString.split(" ");
+            sections.forEach(sectionName => {
+                const span = document.createElement('span');
+                span.className = "context-item";
+                if (sectionName.startsWith("*") && sectionName.endsWith("*")) {
+                    span.innerText = sectionName.slice(1, -1);
+                    span.classList.add("context-highlight");
+                } else {
+                    span.innerText = sectionName;
+                }
+                contextElement.appendChild(span);
+            });
+        }
+
+        socket.on("section_change", (data) => {
+            const cur = data.current;
+            const nxt = data.next;
+
+            // Use the helper for the initial section change too
+            updateContextUI(cur.context || "");
+
+            // Update the rest of the UI (which is anticipated 4 beats early)
+            nameElement.innerText = cur.id;
+            // ... rest of your image/instructions logic ...
+        });
+
+        // STREAM 2: Low Frequency (Section Changes)
+        socket.on("section_change", (data) => {
+            const cur = data.current;
+            const nxt = data.next;
+
+            // --- Updated Context Logic ---
+            // 1. Clear the old list
+            contextElement.innerHTML = ""; 
+            
+            if (cur.context) {
+                // 2. Split the string from server into individual names (e.g., ["L1", "*L2*"])
+                const sections = cur.context.split(" ");
+                
+                // 3. Loop through and create spans for each
+                sections.forEach(sectionName => {
+                    const span = document.createElement('span');
+                    span.className = "context-item"; // Apply base style
+
+                    // Check if this is the active section (contains *)
+                    if (sectionName.startsWith("*") && sectionName.endsWith("*")) {
+                        // Remove the asterisks and apply the highlight class
+                        span.innerText = sectionName.slice(1, -1);
+                        span.classList.add("context-highlight");
+                    } else {
+                        // Just insert the name as is
+                        span.innerText = sectionName;
+                    }
+                    
+                    contextElement.appendChild(span);
+                });
+            }
+            // -------------------------
+
+            // Update Current
+            nameElement.innerText = cur.id;
+            refElement.innerText = cur.timestamp || "--:--";
+            
+            // Update Image
+            imgElement.src = `/images/${cur.id.toLowerCase()}.png`;
+            imgElement.onerror = () => { imgElement.style.display = 'none'; };
+            imgElement.onload = () => { imgElement.style.display = 'block'; };
+
+            // Update Instructions
+            instructionsBox.innerHTML = ""; 
+            cur.instructions.forEach(text => {
+                const p = document.createElement('p');
+                p.className = "instruction-line";
+                p.innerText = text;
+                instructionsBox.appendChild(p);
+            });
+
+            // Update Next
+            if (nxt) {
+                nextTitle.innerText = nxt.id;
+                nextDetails.innerText = nxt.instructions || "";
+            } else {
+                nextTitle.innerText = "END";
+                nextDetails.innerText = "";
+            }
+        });
+    </script>
+</body>
+</html>

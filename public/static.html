@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Luna Rehearsal Tool</title>
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <style>
+        body { background: #111; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        
+        #controls { 
+            background: #222; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin-bottom: 20px; 
+            border: 1px solid #444; 
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        select, button { 
+            padding: 12px 20px; 
+            font-size: 1rem; 
+            cursor: pointer; 
+            background: #333; 
+            color: white; 
+            border: 1px solid #555; 
+            border-radius: 4px; 
+            transition: background 0.2s;
+        }
+
+        button:hover { background: #444; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        #countdown-overlay { 
+            font-size: 5rem; 
+            color: #ffcc00; 
+            font-weight: bold; 
+            height: 1.2em; 
+            margin-top: 10px;
+            text-shadow: 0 0 20px rgba(255, 204, 0, 0.5);
+        }
+
+        #waveform-wrapper { 
+            width: 95%; 
+            margin: 20px auto; 
+            background: #000; 
+            padding: 10px; 
+            border: 1px solid #333; 
+            border-radius: 8px;
+        }
+
+        #display-container { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            gap: 20px; 
+        }
+
+        #visual-cue { 
+            max-width: 80%; 
+            height: auto; 
+            border: 5px solid #444; 
+            background: #222; 
+            min-height: 250px; 
+            border-radius: 4px;
+        }
+
+        #instructions-box { 
+            margin-top: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 12px; 
+            align-items: center; 
+        }
+
+        .instruction-line { 
+            background: rgba(0, 255, 204, 0.1); 
+            color: #00ffcc; 
+            font-size: 2.5rem; 
+            font-weight: bold; 
+            padding: 15px 30px; 
+            border-left: 8px solid #00ffcc; 
+            margin: 0; 
+            text-transform: uppercase; 
+        }
+
+        .info { color: #666; font-family: monospace; margin-top: 40px; font-size: 1.2rem; }
+        #ref-time { color: #ffcc00; font-weight: bold; }
+        
+        #loop-container {
+            margin-left: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <select id="marker-select">
+            <option value="">Loading markers...</option>
+        </select>
+        
+        <button id="play-btn" disabled>PLAY</button>
+
+        <span id="loop-container">
+            <input type="checkbox" id="loop-toggle"> <label for="loop-toggle">Loop Section</label>
+        </span>
+
+        <div id="countdown-overlay"></div>
+    </div>
+
+    <div id="waveform-wrapper">
+        <div id="waveform"></div>
+    </div>
+
+    <div id="display-container">
+        <h1 id="locator-name">LOADING DATA...</h1>
+        <img id="visual-cue" src="" style="display:none;" alt="Visual Event">
+        <div id="instructions-box"></div>
+        
+        <div class="info">
+            Time: <span id="time-val">0.00</span> | Ref: <span id="ref-time">--:--</span>
+        </div>
+    </div>
+
+    <script>
+        let markers = [];
+        let wavesurfer;
+        let countdownTimer = null;
+        let isCountingDown = false;
+        let isAudioPlaying = false;
+
+        const playBtn = document.getElementById('play-btn');
+        const countdownEl = document.getElementById('countdown-overlay');
+        const markerSelect = document.getElementById('marker-select');
+
+        async function init() {
+            try {
+                // 1. Load and Parse Log File
+                const logRes = await fetch('/locator_log.txt');
+                const logText = await logRes.text();
+                parseLog(logText);
+
+                // 2. Load Peaks
+                const peakRes = await fetch('/audio/peaks.json');
+                const peaks = await peakRes.json();
+
+                // 3. Init Wavesurfer
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#444',
+                    progressColor: '#00ffcc',
+                    url: '/audio/testproject.mp3',
+                    peaks: peaks.data,
+                    minPxPerSec: 100, // Zoom level for scrolling effect
+                    autoCenter: true,
+                    interact: true,
+                    fillParent: false 
+                });
+
+                wavesurfer.on('ready', () => {
+                    playBtn.disabled = false;
+                    document.getElementById('locator-name').innerText = "READY";
+                    console.log("WaveSurfer Ready");
+                });
+
+                wavesurfer.on('timeupdate', (currentTime) => {
+                    document.getElementById('time-val').innerText = currentTime.toFixed(2);
+                    handleAutoSectionUpdate(currentTime);
+                    handleLooping(currentTime);
+                });
+
+                wavesurfer.on('play', () => { 
+                    isAudioPlaying = true;
+                    playBtn.innerText = "STOP";
+                });
+
+                wavesurfer.on('pause', () => { 
+                    if (!isCountingDown) {
+                        isAudioPlaying = false;
+                        playBtn.innerText = "PLAY";
+                    }
+                });
+
+                wavesurfer.on('finish', () => stopAll());
+
+            } catch (err) {
+                console.error("Initialization error:", err);
+                document.getElementById('locator-name').innerText = "ERROR LOADING DATA";
+            }
+        }
+
+        function parseLog(text) {
+            const lines = text.split('\n');
+            markerSelect.innerHTML = "";
+
+            lines.forEach(line => {
+                // Regex matches: Timecode | Beats | Seconds | Name
+                const match = line.match(/^(\d+:\d+\.\d+)\s+\|\s+([\d.]+)\s+\|\s+([\d.]+)\s+\|\s+(.*)$/);
+                if (match) {
+                    const marker = {
+                        timecode: match[1],
+                        seconds: parseFloat(match[3]),
+                        id: match[4].split('-')[0].trim(),
+                        instructions: match[4].split('-').slice(2).map(i => i.trim())
+                    };
+                    markers.push(marker);
+                    
+                    const opt = document.createElement('option');
+                    opt.value = markers.length - 1;
+                    opt.innerText = `[${marker.timecode}] ${marker.id}`;
+                    markerSelect.appendChild(opt);
+                }
+            });
+        }
+
+        function displayMarkerInfo(marker) {
+            document.getElementById('locator-name').innerText = marker.id;
+            document.getElementById('ref-time').innerText = marker.timecode;
+            
+            const img = document.getElementById('visual-cue');
+            img.src = `/images/${marker.id.toLowerCase()}.png`;
+            img.style.display = 'block';
+            img.onerror = () => img.style.display = 'none';
+
+            const box = document.getElementById('instructions-box');
+            box.innerHTML = "";
+            marker.instructions.forEach(text => {
+                const p = document.createElement('p');
+                p.className = "instruction-line";
+                p.innerText = text;
+                box.appendChild(p);
+            });
+        }
+
+        function handleAutoSectionUpdate(currentTime) {
+            // Find the active marker based on time
+            const active = [...markers].reverse().find(m => currentTime >= m.seconds);
+            if (active && active.id !== document.getElementById('locator-name').innerText) {
+                displayMarkerInfo(active);
+            }
+        }
+
+        function handleLooping(currentTime) {
+            if (!document.getElementById('loop-toggle').checked) return;
+
+            const selectedIdx = parseInt(markerSelect.value);
+            const currentMarker = markers[selectedIdx];
+            const nextMarker = markers[selectedIdx + 1];
+
+            if (nextMarker && currentTime >= nextMarker.seconds) {
+                wavesurfer.setTime(currentMarker.seconds);
+            }
+        }
+
+        function stopAll() {
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+            isCountingDown = false;
+            wavesurfer.pause();
+            isAudioPlaying = false;
+            countdownEl.innerText = "";
+            playBtn.innerText = "PLAY";
+        }
+
+        playBtn.addEventListener('click', function() {
+            if (isAudioPlaying || isCountingDown) {
+                stopAll();
+            } else {
+                startSequence();
+            }
+        });
+
+        function startSequence() {
+            // Browser Hack: "Prime" the audio context on first click
+            wavesurfer.play(); 
+            wavesurfer.pause(); 
+
+            isCountingDown = true;
+            playBtn.innerText = "STOP";
+            
+            let count = 3;
+            countdownEl.innerText = count;
+
+            countdownTimer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.innerText = count;
+                } else if (count === 0) {
+                    countdownEl.innerText = "GO!";
+                } else {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    isCountingDown = false;
+                    isAudioPlaying = true;
+                    wavesurfer.play();
+                    setTimeout(() => { if (!isCountingDown) countdownEl.innerText = ""; }, 1000);
+                }
+            }, 1000);
+        }
+
+        markerSelect.addEventListener('change', (e) => {
+            const marker = markers[e.target.value];
+            if (marker) {
+                wavesurfer.setTime(marker.seconds);
+                displayMarkerInfo(marker);
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>

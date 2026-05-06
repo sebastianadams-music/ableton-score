@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+# public/audio/*.mp3
+# public/audio/*.json

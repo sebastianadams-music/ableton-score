@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ableton Visualizer</title>
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <style>
+        body { background: #111; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        
+        #display-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        /* Waveform Styling */
+        #waveform-wrapper { 
+            width: 95%; 
+            margin: 10px auto; 
+            background: #000; 
+            padding: 10px; 
+            border: 1px solid #333; 
+            border-radius: 8px;
+            /* Prevents clicking/interaction so you don't accidentally move the playhead */
+            pointer-events: none; 
+        }
+
+        #visual-cue { 
+            max-width: 80%; 
+            height: auto; 
+            border: 5px solid #444; 
+            background: #222; 
+            min-height: 200px;
+        }
+
+        #instructions-box {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .instruction-line {
+            background: rgba(0, 255, 204, 0.1);
+            color: #00ffcc;
+            font-size: 2.5rem;
+            font-weight: bold;
+            padding: 15px 30px;
+            border-left: 8px solid #00ffcc;
+            margin: 0;
+/*             text-transform: uppercase; */
+        }
+
+        .info { color: #666; font-family: monospace; margin-top: 20px; font-size: 1.2rem; }
+        #ref-time { color: #ffcc00; font-weight: bold; }
+        
+        #next-section-box {
+            margin-top: 30px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-top: 1px solid #333;
+            width: 60%;
+        }
+
+        #bars-countdown {
+            font-size: 5rem;
+            color: #ffcc00;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 10px 0;
+        }
+
+        #next-label {
+            color: #888;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+        }
+
+        #next-details {
+            color: #bbb;
+            font-size: 1.2rem;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div id="interaction-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:9999; display:flex; justify-content:center; align-items:center; cursor:pointer;">
+        <h2 style="color:#00ffcc; border: 2px solid #00ffcc; padding: 20px;">CLICK TO SYNC WITH ABLETON</h2>
+    </div>
+    <div id="display-container">
+        <div id="waveform-wrapper">
+            <div id="waveform"></div>
+        </div>
+
+        <h1 id="locator-name">WAITING FOR ABLETON...</h1>
+        
+        <div id="instructions-box"></div>
+
+        
+        <img id="visual-cue" src="" alt="Section Image">
+
+
+        <div class="info">
+            Transport: <span id="time-val">0.00</span> | 
+            Ref: <span id="ref-time">--:--</span>
+        </div>
+        
+        <div id="bars-countdown">0</div>
+
+        <div id="next-section-box">
+            <div id="next-label">Up Next</div>
+            <div id="next-title" style="font-size: 1.8rem; font-weight: bold;">--</div>
+            <div id="next-details">--</div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+const socket = io();
+const imgElement = document.getElementById('visual-cue');
+const nameElement = document.getElementById('locator-name');
+const timeElement = document.getElementById('time-val');
+const refElement = document.getElementById('ref-time');
+const instructionsBox = document.getElementById('instructions-box');
+const countdownElement = document.getElementById('bars-countdown');
+const nextTitle = document.getElementById('next-title');
+const nextDetails = document.getElementById('next-details');
+const overlay = document.getElementById('interaction-overlay');
+
+overlay.addEventListener('click', () => {
+    // This "unlocks" the browser's audio/video restrictions
+    if (wavesurfer) {
+        wavesurfer.play().then(() => {
+            wavesurfer.pause(); // Start and immediately pause to satisfy the browser
+            overlay.style.display = 'none';
+            console.log("Audio Unlocked");
+        });
+    }
+});
+let wavesurfer;
+let isWaveformReady = false;
+let lastTime = -1; // Track if the clock is actually moving
+
+async function initWaveform() {
+    try {
+        const peakRes = await fetch('/audio/peaks.json');
+        const peaks = await peakRes.json();
+
+        // Create a custom AudioContext locked to 48kHz
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: 44100,
+        });
+
+        wavesurfer = WaveSurfer.create({
+            container: '#waveform',
+            waveColor: '#444',
+            progressColor: '#00ffcc',
+            url: '/audio/lunarender.mp3', 
+            peaks: peaks.data,
+            minPxPerSec: 100, 
+            autoCenter: true,
+            interact: false,
+            fillParent: false,
+            audioRate: 1, // Explicitly lock playback speed
+            audioContext: audioContext, // Use the 48kHz context
+        });
+
+        wavesurfer.on('ready', () => {
+            isWaveformReady = true;
+            wavesurfer.setMuted(true); 
+            console.log("Waveform Display Ready @ 48kHz Context");
+        });
+    } catch (err) {
+        console.error("Failed to load waveform:", err);
+    }
+}
+initWaveform();
+
+socket.on("time_update", (data) => {
+    const abletonTime = parseFloat(data.time);
+    
+    // Update UI text
+    timeElement.innerText = abletonTime.toFixed(2);
+    countdownElement.innerText = data.barsUntil;
+
+    if (isWaveformReady) {
+        const localTime = wavesurfer.getCurrentTime();
+        const drift = Math.abs(abletonTime - localTime);
+
+        // 1. IS ABLETON MOVING? 
+        // We compare current abletonTime to the last recorded one
+        if (abletonTime !== lastTime) {
+            
+            // If Ableton is moving but our local playhead is sitting still, KICKSTART IT.
+            // This is what gives you the 60fps smooth glide.
+            if (!wavesurfer.isPlaying()) {
+                wavesurfer.play();
+            }
+
+            // 2. DRIFT CORRECTION
+            // If the local glide is off by more than 150ms, nudge it.
+            // We don't do this every 100ms, only when it actually drifts.
+            if (drift > .150) {
+                wavesurfer.setTime(abletonTime);
+            }
+
+        } else {
+            // Ableton has stopped or is paused.
+            if (wavesurfer.isPlaying()) {
+                wavesurfer.pause();
+                wavesurfer.setTime(abletonTime); // Snap to exact stop point
+            }
+        }
+
+        lastTime = abletonTime;
+    }
+});
+socket.on("section_change", (data) => {
+    const cur = data.current;
+    const nxt = data.next;
+
+    nameElement.innerText = cur.id;
+    refElement.innerText = cur.timestamp;
+    
+    // Ensure lowercase images for Linux LXC
+    imgElement.src = `/images/${cur.id.toLowerCase()}.png`;
+
+    instructionsBox.innerHTML = ""; 
+    cur.instructions.forEach(text => {
+        const p = document.createElement('p');
+        p.className = "instruction-line";
+        p.innerText = text;
+        instructionsBox.appendChild(p);
+    });
+
+if (nxt) {
+        nextTitle.innerText = nxt.id;
+        // Check if it's an array before joining, otherwise just show the string
+        nextDetails.innerText = Array.isArray(nxt.instructions) 
+            ? nxt.instructions.join(" | ") 
+            : nxt.instructions;
+    }
+});
+    </script>
+</body>
+</html>
