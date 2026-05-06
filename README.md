@@ -58,7 +58,7 @@ syncLocators.js and importLocators.js both perform destructive edits to your Abl
 1. importLocators.js is dodgy, it doesn't work consistently after trying many things.
 2. What does work is to use a modified version of a Max4Live object made by RiversL
     https://www.maxforlive.com/library/device/8295/exportlocatorids
-3. I modified this object to have an import function too.
+3. I modified this object to have an import function too. A copy of my modified object is in this repository.
 4. Export your locators first using the max4Live object.
 5. Go to new project and drop in the Max4Live object.
 6. Make sure the project is as long as the source project (even with a blank MIDI clip)
